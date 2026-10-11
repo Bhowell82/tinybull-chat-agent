@@ -25,6 +25,11 @@ export const cfg = {
     spam: env.TAG_SPAM || "lead-spam",
   },
   slackWebhook: env.SLACK_WEBHOOK_URL || "",
+  // Polling needs only the personal access token (no LiveChat app or webhook)
+  poll: {
+    enabled: env.POLL_ENABLED !== "0",
+    intervalMs: Number(env.POLL_INTERVAL_MS || 5000),
+  },
   // Safety valves
   maxAgentRepliesPerChat: 12,
 };
@@ -35,7 +40,6 @@ export function assertConfig() {
   if (!cfg.anthropicKey) missing.push("ANTHROPIC_API_KEY");
   if (!cfg.lc.accountId) missing.push("LIVECHAT_ACCOUNT_ID");
   if (!cfg.lc.pat) missing.push("LIVECHAT_PAT");
-  if (!cfg.lc.webhookSecret) missing.push("LIVECHAT_WEBHOOK_SECRET");
   if (!cfg.lc.botAgentId) missing.push("LIVECHAT_BOT_AGENT_ID");
   if (missing.length) {
     throw new Error(`Missing required env vars: ${missing.join(", ")}`);

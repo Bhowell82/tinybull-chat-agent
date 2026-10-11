@@ -25,8 +25,10 @@ Guardrails built in: it only answers when the visitor spoke last, ignores privat
 - Set the variables from `.env.example`. At minimum: `ANTHROPIC_API_KEY`, `LIVECHAT_ACCOUNT_ID`, `LIVECHAT_PAT`, `LIVECHAT_WEBHOOK_SECRET` (any long random string), `LIVECHAT_BOT_AGENT_ID`.
 - Generate a public domain for the service. Check `https://YOUR-DOMAIN/health`.
 
-### 3. Register the webhook
-Use LiveChat's Configuration API (`register_webhook`) with:
+### 3. Receiving chats: polling (default) or webhook
+**Polling (default, no extra setup):** the service checks LiveChat every 5 seconds (`POLL_INTERVAL_MS`) for new visitor messages using only the personal access token. No LiveChat app, Client ID, or webhook secret needed. Watch the Railway logs for `polling LiveChat every 5000ms` and any `poll error` lines (a poll error usually means the token is missing a chat read/write scope).
+
+**Webhook (optional, faster):** set `POLL_ENABLED=0`, set `LIVECHAT_WEBHOOK_SECRET`, and register the webhook. Use LiveChat's Configuration API (`register_webhook`) with:
 - `action`: `incoming_event`
 - `url`: `https://YOUR-DOMAIN/webhook/livechat`
 - `secret_key`: the same value as `LIVECHAT_WEBHOOK_SECRET`

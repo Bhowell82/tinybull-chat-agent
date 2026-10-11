@@ -1,6 +1,6 @@
 import express from "express";
 import { cfg, assertConfig } from "./config.js";
-import { getChat, sendMessage, tagThread } from "./livechat.js";
+import { getChat, sendMessage, tagThread, listVisitorMessages } from "./livechat.js";
 import { decide } from "./agent.js";
 
 assertConfig();
@@ -19,7 +19,8 @@ app.get("/health", (_req, res) => res.json({ ok: true, mode: cfg.mode, mock: cfg
 app.post("/webhook/livechat", (req, res) => {
   const body = req.body || {};
 
-  if (!cfg.mock && body.secret_key !== cfg.lc.webhookSecret) {
+  // Webhook is optional. With no secret configured it is disabled entirely.
+  if (!cfg.mock && (!cfg.lc.webhookSecret || body.secret_key !== cfg.lc.webhookSecret)) {
     return res.status(401).json({ error: "bad secret" });
   }
 
@@ -35,17 +36,58 @@ app.post("/webhook/livechat", (req, res) => {
   const chatId = p.chat_id;
   if (!chatId) return;
 
-  // Only react to visitor messages. LiveChat tags the author; customers are not agents.
-  // We confirm again inside handleChat() using the full transcript.
+  // We confirm the visitor spoke last inside handleChat() using the full transcript.
+  schedule(chatId, p.thread_id, ev.id);
+});
+
+// Debounce: wait for the visitor to finish typing before replying. Used by both webhook and polling.
+function schedule(chatId, threadId, eventId) {
   if (timers.has(chatId)) clearTimeout(timers.get(chatId));
   timers.set(
     chatId,
     setTimeout(() => {
       timers.delete(chatId);
-      handleChat(chatId, p.thread_id, ev.id).catch((err) => console.error(`[${chatId}] handler error:`, err.message));
+      handleChat(chatId, threadId, eventId).catch((err) => console.error(`[${chatId}] handler error:`, err.message));
     }, cfg.debounceMs)
   );
-});
+}
+
+// --- Polling: no webhook or LiveChat app needed, only the personal access token ---
+const startedAt = Date.now();
+const polledSeen = new Set();
+let lastPollErrorAt = 0;
+
+async function pollOnce() {
+  const items = await listVisitorMessages();
+  for (const it of items) {
+    if (Date.parse(it.at) < startedAt - 60_000) continue; // ignore history from before we started
+    const key = `${it.chatId}|${it.eventId}`;
+    if (polledSeen.has(key)) continue;
+    polledSeen.add(key);
+    if (polledSeen.size > 5000) polledSeen.clear();
+    console.log(`[${it.chatId}] new visitor message detected (poll)`);
+    schedule(it.chatId, it.threadId, it.eventId);
+  }
+}
+
+function startPolling() {
+  if (!cfg.poll.enabled) return;
+  console.log(`polling LiveChat every ${cfg.poll.intervalMs}ms`);
+  const tick = async () => {
+    try {
+      await pollOnce();
+    } catch (err) {
+      // Log at most once a minute so a scope or auth problem is visible but not spammy
+      if (Date.now() - lastPollErrorAt > 60_000) {
+        lastPollErrorAt = Date.now();
+        console.error(`poll error: ${err.message}`);
+      }
+    } finally {
+      setTimeout(tick, cfg.poll.intervalMs);
+    }
+  };
+  tick();
+}
 
 async function handleChat(chatId, threadId, triggerEventId) {
   if (inFlight.has(chatId)) {
@@ -152,4 +194,5 @@ async function notifyTeam(chat, d) {
 
 app.listen(cfg.port, () => {
   console.log(`tinybull-chat-agent listening on :${cfg.port} (mode=${cfg.mode}, mock=${cfg.mock})`);
+  startPolling();
 });

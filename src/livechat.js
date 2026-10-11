@@ -89,6 +89,32 @@ export async function tagThread(chatId, threadId, tag) {
   return call("tag_thread", { chat_id: chatId, thread_id: threadId, tag });
 }
 
+let mockPolled = false;
+
+/**
+ * Lists active chats whose latest public message was written by the visitor.
+ * Returns [{ chatId, threadId, eventId, at }]. Used by the poller instead of webhooks.
+ */
+export async function listVisitorMessages(limit = 25) {
+  if (cfg.mock) {
+    if (mockPolled) return [];
+    mockPolled = true;
+    return [{ chatId: "MOCKCHAT", threadId: "MOCKTHREAD", eventId: "mock-ev-1", at: new Date().toISOString() }];
+  }
+  const raw = await call("list_chats", { filters: { include_active: true }, limit });
+  const out = [];
+  for (const c of raw.chats_summary || []) {
+    const last = c.last_event_per_type?.message;
+    const ev = last?.event;
+    if (!ev || !ev.text) continue;
+    if (ev.visibility && ev.visibility !== "all") continue;
+    const customerIds = new Set((c.users || []).filter((u) => u.type === "customer").map((u) => u.id));
+    if (!customerIds.has(ev.author_id)) continue;
+    out.push({ chatId: c.id, threadId: last.thread_id, eventId: ev.id, at: ev.created_at });
+  }
+  return out;
+}
+
 function mockChat(chatId) {
   return {
     chatId,
