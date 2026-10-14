@@ -9,7 +9,7 @@ export const cfg = {
   bookingUrl: env.BOOKING_URL || "",
   teamEmail: env.TEAM_EMAIL || "",
   textLine: env.TEXT_LINE || "",
-  model: env.CLAUDE_MODEL || "claude-sonnet-5-5",
+  model: env.CLAUDE_MODEL || "claude-sonnet-4-6",
   anthropicKey: env.ANTHROPIC_API_KEY || "",
   lc: {
     accountId: env.LIVECHAT_ACCOUNT_ID || "",
