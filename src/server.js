@@ -192,7 +192,18 @@ async function notifyTeam(chat, d) {
   ));
 }
 
+async function setAgentOnline() {
+  try {
+    const { setRoutingStatus } = await import("./livechat.js");
+    await setRoutingStatus("accepting_chats");
+    console.log("agent status set to accepting_chats");
+  } catch (e) {
+    console.error("could not set agent status:", e.message);
+  }
+}
+
 app.listen(cfg.port, () => {
   console.log(`tinybull-chat-agent listening on :${cfg.port} (mode=${cfg.mode}, mock=${cfg.mock})`);
+  setAgentOnline();
   startPolling();
 });

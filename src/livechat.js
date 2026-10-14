@@ -85,6 +85,11 @@ export async function sendMessage(chatId, text, { privateNote = false } = {}) {
   });
 }
 
+export async function setRoutingStatus(status) {
+  if (cfg.mock) { console.log(`[mock] routing status -> ${status}`); return; }
+  return call("set_routing_status", { status });
+}
+
 export async function tagThread(chatId, threadId, tag) {
   if (cfg.mock) {
     console.log(`[mock] TAG ${tag} -> ${chatId}/${threadId}`);
