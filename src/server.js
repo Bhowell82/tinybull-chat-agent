@@ -176,20 +176,20 @@ function internalNote(d) {
 
 async function notifyTeam(chat, d) {
   const name = chat.customer?.name || "Website visitor";
-  const text = `${d.lead_score === "hot" ? "🔥 Hot lead" : "Chat needs a human"} on tinybull.com chat: ${name}\n${d.handoff_reason || ""}\n${d.summary || ""}`.trim();
-  if (cfg.mock || !cfg.slackWebhook) {
-    console.log(`[notify] ${text}`);
-    return;
-  }
-  try {
-    await fetch(cfg.slackWebhook, {
+  const brand = (chat.siteUrl || "").toLowerCase().includes("resirhino") ? "ResiRhino" : "TinyBull";
+  const text = `${d.lead_score === "hot" ? "🔥 Hot lead" : "Chat needs a human"} on ${brand} chat: ${name}\n${d.handoff_reason || ""}\n${d.summary || ""}`.trim();
+  if (cfg.mock) { console.log(`[notify] ${text}`); return; }
+  const hooks = [
+    cfg.slackWebhook ? { url: cfg.slackWebhook, label: "slack" } : null,
+    cfg.textLine     ? { url: cfg.textLine,     label: "text"  } : null,
+  ].filter(Boolean);
+  await Promise.all(hooks.map(({ url, label }) =>
+    fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text }),
-    });
-  } catch (e) {
-    console.error("slack notify failed:", e.message);
-  }
+      body: JSON.stringify({ text, lead_score: d.lead_score, handoff: d.handoff, name, brand }),
+    }).catch((e) => console.error(`${label} notify failed: ${e.message}`))
+  ));
 }
 
 app.listen(cfg.port, () => {
