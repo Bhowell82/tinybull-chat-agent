@@ -25,6 +25,7 @@ export const cfg = {
     spam: env.TAG_SPAM || "lead-spam",
   },
   fredContext: env.FRED_CONTEXT || "",
+  resiContext: env.RESI_CONTEXT || "",
   slackWebhook: env.SLACK_WEBHOOK_URL || "",
   // Polling needs only the personal access token (no LiveChat app or webhook)
   poll: {

@@ -67,7 +67,7 @@ export async function decide(chat) {
   const res = await getClient().messages.create({
     model: cfg.model,
     max_tokens: 700,
-    system: buildSystemPrompt(cfg),
+    system: buildSystemPrompt(cfg, chat),
     tools: [respondTool],
     tool_choice: { type: "tool", name: "respond" },
     messages: turns,

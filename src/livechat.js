@@ -46,10 +46,14 @@ export async function getChat(chatId, threadId) {
     messages.push({ role: isVisitor ? "visitor" : "team", text: ev.text, at: ev.created_at });
   }
 
+  const pages = customer.last_visit?.last_pages || [];
+  const siteUrl = pages[0]?.url || "";
+
   return {
     chatId,
     threadId: thread.id || threadId,
     customer: { id: customer.id, name: customer.name || "", email: customer.email || "" },
+    siteUrl,
     messages,
     agentReplyCount,
     tags: thread.tags || [],
