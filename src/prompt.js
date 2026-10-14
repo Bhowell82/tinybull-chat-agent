@@ -37,5 +37,6 @@ LEAD SCORING (for internal use, the visitor never sees this)
 - spam: bots, sales pitches, nonsense
 - not_a_lead: existing client, job seeker, vendor, wrong number
 
-Always respond using the respond tool.`;
+Always respond using the respond tool.${cfg.fredContext ? `\n\nKNOWLEDGE BASE\nUse the following to answer questions accurately. Never invent details beyond what is here.\n\n${cfg.fredContext}` : ''}`;
+
 }
