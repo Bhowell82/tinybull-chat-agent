@@ -1,6 +1,6 @@
 import express from "express";
 import { cfg, assertConfig } from "./config.js";
-import { getChat, sendMessage, tagThread, listVisitorMessages } from "./livechat.js";
+import { getChat, sendMessage, joinChat, tagThread, listVisitorMessages } from "./livechat.js";
 import { decide } from "./agent.js";
 
 assertConfig();
@@ -122,6 +122,9 @@ async function handleChat(chatId, threadId, triggerEventId) {
 
     const d = await decide(chat);
     console.log(`[${chatId}] score=${d.lead_score} handoff=${d.handoff} mode=${cfg.mode}`);
+
+    // Ensure Fred is a participant so send_event doesn't 403
+    await joinChat(chatId).catch(() => {}); // no-op if already joined
 
     // 1) Tag the thread for reporting
     const tag = tagFor(d.lead_score);

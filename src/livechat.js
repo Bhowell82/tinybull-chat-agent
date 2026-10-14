@@ -74,6 +74,11 @@ export async function getChat(chatId, threadId) {
   };
 }
 
+export async function joinChat(chatId) {
+  if (cfg.mock) { console.log(`[mock] JOIN ${chatId}`); return; }
+  return call("join_chat", { chat_id: chatId });
+}
+
 export async function sendMessage(chatId, text, { privateNote = false } = {}) {
   if (cfg.mock) {
     console.log(`[mock] ${privateNote ? "PRIVATE NOTE" : "PUBLIC REPLY"} -> ${chatId}: ${text}`);
