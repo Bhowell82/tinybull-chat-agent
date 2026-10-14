@@ -1,6 +1,6 @@
 import express from "express";
 import { cfg, assertConfig } from "./config.js";
-import { getChat, sendMessage, joinChat, tagThread, listVisitorMessages } from "./livechat.js";
+import { getChat, sendMessage, joinChat, sendTypingIndicator, tagThread, listVisitorMessages } from "./livechat.js";
 import { decide } from "./agent.js";
 
 assertConfig();
@@ -120,11 +120,25 @@ async function handleChat(chatId, threadId, triggerEventId) {
       return;
     }
 
-    const d = await decide(chat);
-    console.log(`[${chatId}] score=${d.lead_score} handoff=${d.handoff} mode=${cfg.mode}`);
 
     // Ensure Fred is a participant so send_event doesn't 403
-    await joinChat(chatId).catch(() => {}); // no-op if already joined
+    await joinChat(chatId).catch(() => {});
+
+    // Show typing bubble while Claude thinks; refresh every 1.5s so it stays visible
+    await sendTypingIndicator(chatId, true).catch(() => {});
+    const typingInterval = setInterval(
+      () => sendTypingIndicator(chatId, true).catch(() => {}),
+      1500
+    );
+    let d;
+    try {
+      d = await decide(chat);
+    } finally {
+      clearInterval(typingInterval);
+      sendTypingIndicator(chatId, false).catch(() => {});
+    }
+
+    console.log(`[${chatId}] score=${d.lead_score} handoff=${d.handoff} mode=${cfg.mode}`);
 
     // 1) Tag the thread for reporting
     const tag = tagFor(d.lead_score);

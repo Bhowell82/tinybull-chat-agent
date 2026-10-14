@@ -79,6 +79,11 @@ export async function joinChat(chatId) {
   return call("join_chat", { chat_id: chatId });
 }
 
+export async function sendTypingIndicator(chatId, isTyping = true) {
+  if (cfg.mock) { return; }
+  return call("send_typing_indicator", { chat_id: chatId, is_typing: isTyping });
+}
+
 export async function sendMessage(chatId, text, { privateNote = false } = {}) {
   if (cfg.mock) {
     console.log(`[mock] ${privateNote ? "PRIVATE NOTE" : "PUBLIC REPLY"} -> ${chatId}: ${text}`);
