@@ -20,6 +20,14 @@ export const cfg = {
     clientId: env.LIVECHAT_CLIENT_ID || "",
     // The agent ID (usually the email) of the account the PAT belongs to, so the bot can tell its own messages from a human's
     botAgentId: env.LIVECHAT_BOT_AGENT_ID || "",
+    // Optional: Text organization ID and region (e.g. "dal"), passed on the RTM websocket URL. Usually not needed with a PAT.
+    organizationId: env.LIVECHAT_ORGANIZATION_ID || "",
+    region: env.LIVECHAT_REGION || "",
+  },
+  // RTM: one persistent websocket logged in with the PAT; LiveChat pushes visitor messages to us.
+  // Default on. This is the primary source; the webhook and polling are fallbacks.
+  rtm: {
+    enabled: env.RTM_ENABLED !== "0",
   },
   // Public base URL of this service, used to build the webhook URL. Railway sets RAILWAY_PUBLIC_DOMAIN automatically.
   publicUrl: (env.PUBLIC_URL || (env.RAILWAY_PUBLIC_DOMAIN ? `https://${env.RAILWAY_PUBLIC_DOMAIN}` : "")).replace(/\/+$/, ""),
@@ -39,10 +47,13 @@ export const cfg = {
     autoRegister: env.WEBHOOK_AUTO_REGISTER !== "0",
   },
   // Polling needs only the personal access token (no LiveChat app or webhook).
-  // Default: every 5s when polling is the only source; every 5 min as a safety net once a webhook is configured.
+  // Default: every 5s when polling is the only source; every 10 min as a safety net when RTM or a webhook is on.
   poll: {
     enabled: env.POLL_ENABLED !== "0",
-    intervalMs: Number(env.POLL_INTERVAL_MS || (env.LIVECHAT_WEBHOOK_SECRET && env.LIVECHAT_CLIENT_ID ? 300_000 : 5000)),
+    intervalMs: Number(
+      env.POLL_INTERVAL_MS ||
+        (env.RTM_ENABLED !== "0" || (env.LIVECHAT_WEBHOOK_SECRET && env.LIVECHAT_CLIENT_ID) ? 600_000 : 5000)
+    ),
   },
   // Safety valves
   maxAgentRepliesPerChat: 12,

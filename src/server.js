@@ -2,6 +2,7 @@ import express from "express";
 import { cfg, assertConfig } from "./config.js";
 import { getChat, sendMessage, joinChat, sendTypingIndicator, tagThread, listVisitorMessages, ensureWebhook, webhookUrl } from "./livechat.js";
 import { decide } from "./agent.js";
+import { createRtm } from "./rtm.js";
 
 assertConfig();
 
@@ -16,6 +17,7 @@ const polledSeen = new Set(); // "chatId|eventId" already scheduled, from either
 
 let webhookState = { status: "pending" };
 let lastWebhookAt = null;
+let rtm = null;
 
 app.get("/", (_req, res) => res.send("tinybull-chat-agent ok"));
 app.get("/health", (_req, res) =>
@@ -23,10 +25,22 @@ app.get("/health", (_req, res) =>
     ok: true,
     mode: cfg.mode,
     mock: cfg.mock,
+    rtm: rtm ? rtm.state : { status: cfg.rtm.enabled ? "pending" : "disabled" },
     webhook: { ...webhookState, url: webhookUrl() || null, lastReceivedAt: lastWebhookAt },
     poll: { enabled: cfg.poll.enabled, intervalMs: cfg.poll.intervalMs },
   })
 );
+
+// Shared entry point for every source (rtm, webhook, poll). Dedupes on chat+event, then debounces.
+function onVisitorMessage({ chatId, threadId, eventId, source }) {
+  if (!chatId) return;
+  const key = `${chatId}|${eventId}`;
+  if (polledSeen.has(key)) return;
+  polledSeen.add(key);
+  if (polledSeen.size > 5000) polledSeen.clear();
+  console.log(`[${chatId}] new visitor message detected (${source})`);
+  schedule(chatId, threadId, eventId);
+}
 
 app.post("/webhook/livechat", (req, res) => {
   const body = req.body || {};
@@ -46,15 +60,8 @@ app.post("/webhook/livechat", (req, res) => {
   if (ev.type !== "message" || !ev.text) return;
   if (ev.visibility && ev.visibility !== "all") return; // ignore private notes
 
-  const chatId = p.chat_id;
-  if (!chatId) return;
-
-  // Mark it seen so the safety-net poll doesn't schedule the same event a second time.
-  polledSeen.add(`${chatId}|${ev.id}`);
-  console.log(`[${chatId}] new visitor message detected (webhook)`);
-
   // We confirm the visitor spoke last inside handleChat() using the full transcript.
-  schedule(chatId, p.thread_id, ev.id);
+  onVisitorMessage({ chatId: p.chat_id, threadId: p.thread_id, eventId: ev.id, source: "webhook" });
 });
 
 // Debounce: wait for the visitor to finish typing before replying. Used by both webhook and polling.
@@ -78,18 +85,14 @@ async function pollOnce() {
   const items = await listVisitorMessages();
   for (const it of items) {
     if (Date.parse(it.at) < startedAt - 60_000) continue; // ignore history from before we started
-    const key = `${it.chatId}|${it.eventId}`;
-    if (polledSeen.has(key)) continue;
-    polledSeen.add(key);
-    if (polledSeen.size > 5000) polledSeen.clear();
-    console.log(`[${it.chatId}] new visitor message detected (poll)`);
-    schedule(it.chatId, it.threadId, it.eventId);
+    onVisitorMessage({ chatId: it.chatId, threadId: it.threadId, eventId: it.eventId, source: "poll" });
   }
 }
 
 function startPolling() {
   if (!cfg.poll.enabled) { console.log("polling disabled (POLL_ENABLED=0)"); return; }
-  console.log(`polling LiveChat every ${cfg.poll.intervalMs}ms${cfg.webhook.configured ? " (safety net; webhook is primary)" : ""}`);
+  const primary = cfg.rtm.enabled ? "rtm" : cfg.webhook.configured ? "webhook" : null;
+  console.log(`polling LiveChat every ${cfg.poll.intervalMs}ms${primary ? ` (safety net; ${primary} is primary)` : ""}`);
   const tick = async () => {
     try {
       await pollOnce();
@@ -257,9 +260,18 @@ async function setupWebhook() {
   }
 }
 
+function startRtm() {
+  if (!cfg.rtm.enabled) { console.log("rtm disabled (RTM_ENABLED=0)"); return; }
+  if (cfg.mock) { console.log("[mock] rtm would connect here"); return; }
+  rtm = createRtm({ onVisitorMessage });
+  rtm.start();
+}
+
 app.listen(cfg.port, async () => {
   console.log(`tinybull-chat-agent listening on :${cfg.port} (mode=${cfg.mode}, mock=${cfg.mock})`);
-  await setAgentOnline();
+  startRtm();
+  // RTM sets routing status itself once logged in; the Web API call only works while an RTM session is connected.
+  if (!cfg.rtm.enabled) await setAgentOnline();
   await setupWebhook();
   startPolling();
 });

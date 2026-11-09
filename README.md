@@ -25,15 +25,17 @@ Guardrails built in: it only answers when the visitor spoke last, ignores privat
 - Set the variables from `.env.example`. At minimum: `ANTHROPIC_API_KEY`, `LIVECHAT_ACCOUNT_ID`, `LIVECHAT_PAT`, `LIVECHAT_WEBHOOK_SECRET` (any long random string), `LIVECHAT_BOT_AGENT_ID`.
 - Generate a public domain for the service. Check `https://YOUR-DOMAIN/health`.
 
-### 3. Receiving chats: webhook (recommended) with polling as a safety net
-**Webhook (recommended):** LiveChat pushes each visitor message to the service the instant it lands, so idle API usage is near zero. The service registers the webhook itself on boot (idempotent), as long as these are set:
+### 3. Receiving chats: RTM websocket (default), with webhook and polling as fallbacks
+**RTM (default, no extra setup):** the service opens one persistent websocket to LiveChat's Agent Chat API, logs in with the PAT, and LiveChat pushes `incoming_chat` / `incoming_event` the instant a visitor writes. No app, Client ID, or webhook needed, and the bot agent shows as connected so `accepting_chats` works. Reconnects automatically with backoff. `/health` shows `rtm.status` (`logged_in` is good) and `rtm.lastPushAt`. Set `RTM_ENABLED=0` to turn it off. `LIVECHAT_ORGANIZATION_ID` / `LIVECHAT_REGION` are optional and only needed if login complains.
+
+**Webhook (optional):** LiveChat posts each visitor message to the service over HTTP. Only possible if your Developer Console can create apps. The service registers the webhook itself on boot (idempotent), as long as these are set:
 - `LIVECHAT_WEBHOOK_SECRET`: any long random string
 - `LIVECHAT_CLIENT_ID`: the Client ID of the LiveChat app your PAT belongs to (Developer Console > your app > Authorization)
 - A public URL: Railway sets `RAILWAY_PUBLIC_DOMAIN` automatically; elsewhere set `PUBLIC_URL`
 
 The PAT needs the `webhooks.configuration:rw` scope in addition to its chat scopes, and the app must be installed on your license (Developer Console > your app > Private installation > Install). The registered webhook is `incoming_event`, type `license`, filtered to `author_type: customer`, pointed at `https://YOUR-DOMAIN/webhook/livechat`. Check `/health` after deploy: `webhook.status` should read `registered` or `exists`, and `webhook.lastReceivedAt` updates when LiveChat posts. Set `WEBHOOK_AUTO_REGISTER=0` if you'd rather register it by hand.
 
-**Polling:** the service also polls `list_chats` using only the PAT. With a webhook configured it defaults to every 5 minutes (`POLL_INTERVAL_MS=300000`) as a safety net for anything LiveChat fails to deliver. Without a webhook it defaults to every 5 seconds, which is roughly 17,000 API calls a day, so don't run that way for long. `POLL_ENABLED=0` turns polling off entirely. A `poll error` line usually means the token is missing a chat read scope.
+**Polling:** the service also polls `list_chats` using only the PAT. With RTM or a webhook on it defaults to every 10 minutes (`POLL_INTERVAL_MS=600000`) as a safety net for anything LiveChat fails to push. With both off it defaults to every 5 seconds, which is roughly 17,000 API calls a day, so don't run that way for long. `POLL_ENABLED=0` turns polling off entirely. A `poll error` line usually means the token is missing a chat read scope.
 
 ### 4. Roll out in stages
 1. Leave `AGENT_MODE=suggest` for a week. Read the drafts, edit the system prompt in `src/prompt.js` until they sound like you.
