@@ -1,6 +1,6 @@
 import express from "express";
 import { cfg, assertConfig } from "./config.js";
-import { getChat, sendMessage, joinChat, sendTypingIndicator, tagThread, listVisitorMessages } from "./livechat.js";
+import { getChat, sendMessage, joinChat, sendTypingIndicator, tagThread, listVisitorMessages, ensureWebhook, webhookUrl } from "./livechat.js";
 import { decide } from "./agent.js";
 
 assertConfig();
@@ -12,9 +12,21 @@ const timers = new Map(); // chatId -> debounce timer
 const inFlight = new Set(); // chatIds currently being processed
 const lastHandled = new Map(); // chatId -> id of last visitor event we answered
 const handedOff = new Set(); // chatIds where a human was pinged, bot stays quiet in auto mode
+const polledSeen = new Set(); // "chatId|eventId" already scheduled, from either webhook or poll
+
+let webhookState = { status: "pending" };
+let lastWebhookAt = null;
 
 app.get("/", (_req, res) => res.send("tinybull-chat-agent ok"));
-app.get("/health", (_req, res) => res.json({ ok: true, mode: cfg.mode, mock: cfg.mock }));
+app.get("/health", (_req, res) =>
+  res.json({
+    ok: true,
+    mode: cfg.mode,
+    mock: cfg.mock,
+    webhook: { ...webhookState, url: webhookUrl() || null, lastReceivedAt: lastWebhookAt },
+    poll: { enabled: cfg.poll.enabled, intervalMs: cfg.poll.intervalMs },
+  })
+);
 
 app.post("/webhook/livechat", (req, res) => {
   const body = req.body || {};
@@ -26,6 +38,7 @@ app.post("/webhook/livechat", (req, res) => {
 
   // Acknowledge fast; do the work async.
   res.status(200).json({ ok: true });
+  lastWebhookAt = new Date().toISOString();
 
   if (body.action !== "incoming_event") return;
   const p = body.payload || {};
@@ -35,6 +48,10 @@ app.post("/webhook/livechat", (req, res) => {
 
   const chatId = p.chat_id;
   if (!chatId) return;
+
+  // Mark it seen so the safety-net poll doesn't schedule the same event a second time.
+  polledSeen.add(`${chatId}|${ev.id}`);
+  console.log(`[${chatId}] new visitor message detected (webhook)`);
 
   // We confirm the visitor spoke last inside handleChat() using the full transcript.
   schedule(chatId, p.thread_id, ev.id);
@@ -52,9 +69,9 @@ function schedule(chatId, threadId, eventId) {
   );
 }
 
-// --- Polling: no webhook or LiveChat app needed, only the personal access token ---
+// --- Polling: no webhook or LiveChat app needed, only the personal access token.
+// With a webhook configured this runs as a slow safety net (default every 5 min) to catch anything LiveChat failed to deliver.
 const startedAt = Date.now();
-const polledSeen = new Set();
 let lastPollErrorAt = 0;
 
 async function pollOnce() {
@@ -71,8 +88,8 @@ async function pollOnce() {
 }
 
 function startPolling() {
-  if (!cfg.poll.enabled) return;
-  console.log(`polling LiveChat every ${cfg.poll.intervalMs}ms`);
+  if (!cfg.poll.enabled) { console.log("polling disabled (POLL_ENABLED=0)"); return; }
+  console.log(`polling LiveChat every ${cfg.poll.intervalMs}ms${cfg.webhook.configured ? " (safety net; webhook is primary)" : ""}`);
   const tick = async () => {
     try {
       await pollOnce();
@@ -219,8 +236,30 @@ async function setAgentOnline() {
   }
 }
 
-app.listen(cfg.port, () => {
+async function setupWebhook() {
+  if (!cfg.webhook.configured) {
+    webhookState = { status: "not_configured" };
+    console.log("webhook not configured (set LIVECHAT_WEBHOOK_SECRET + LIVECHAT_CLIENT_ID); polling is the only source");
+    return;
+  }
+  if (!cfg.webhook.autoRegister) {
+    webhookState = { status: "manual" };
+    console.log(`webhook auto-register off; expecting LiveChat to post to ${webhookUrl()}`);
+    return;
+  }
+  try {
+    webhookState = await ensureWebhook();
+    console.log(`webhook ${webhookState.status}${webhookState.id ? ` (id ${webhookState.id})` : ""} -> ${webhookUrl()}`);
+  } catch (e) {
+    webhookState = { status: "error", reason: e.message };
+    console.error(`webhook registration failed: ${e.message}`);
+    console.error("  -> check the PAT has scope webhooks.configuration:rw and LIVECHAT_CLIENT_ID is the app that owns the PAT");
+  }
+}
+
+app.listen(cfg.port, async () => {
   console.log(`tinybull-chat-agent listening on :${cfg.port} (mode=${cfg.mode}, mock=${cfg.mock})`);
-  setAgentOnline();
+  await setAgentOnline();
+  await setupWebhook();
   startPolling();
 });

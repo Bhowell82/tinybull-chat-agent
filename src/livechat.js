@@ -1,14 +1,15 @@
 import { cfg } from "./config.js";
 
 const BASE = "https://api.livechatinc.com/v3.5/agent/action";
+const CONFIG_BASE = "https://api.livechatinc.com/v3.7/configuration/action";
 
 function authHeader() {
   const token = Buffer.from(`${cfg.lc.accountId}:${cfg.lc.pat}`).toString("base64");
   return `Basic ${token}`;
 }
 
-async function call(action, body) {
-  const res = await fetch(`${BASE}/${action}`, {
+async function call(action, body, base = BASE) {
+  const res = await fetch(`${base}/${action}`, {
     method: "POST",
     headers: {
       Authorization: authHeader(),
@@ -132,6 +133,62 @@ export async function listVisitorMessages(limit = 25) {
     out.push({ chatId: c.id, threadId: last.thread_id, eventId: ev.id, at: ev.created_at });
   }
   return out;
+}
+
+// --- Configuration API: webhook management (needs PAT scope webhooks.configuration:rw) ---
+
+export const WEBHOOK_ACTION = "incoming_event";
+
+export function webhookUrl() {
+  return cfg.publicUrl ? `${cfg.publicUrl}/webhook/livechat` : "";
+}
+
+/** Lists webhooks owned by this app's client ID. */
+export async function listWebhooks() {
+  if (cfg.mock) return [];
+  const raw = await call("list_webhooks", { owner_client_id: cfg.lc.clientId }, CONFIG_BASE);
+  return Array.isArray(raw) ? raw : raw.webhooks || [];
+}
+
+/**
+ * Registers a license-wide incoming_event webhook pointed at this service, filtered to
+ * customer-authored events so agent messages and typing noise never hit us.
+ */
+export async function registerWebhook() {
+  if (cfg.mock) { console.log(`[mock] REGISTER WEBHOOK ${webhookUrl()}`); return { id: "mock" }; }
+  return call(
+    "register_webhook",
+    {
+      url: webhookUrl(),
+      description: "tinybull-chat-agent: visitor messages",
+      action: WEBHOOK_ACTION,
+      secret_key: cfg.lc.webhookSecret,
+      owner_client_id: cfg.lc.clientId,
+      type: "license",
+      filters: { author_type: "customer" },
+    },
+    CONFIG_BASE
+  );
+}
+
+/** Unregisters a webhook by ID. */
+export async function unregisterWebhook(id) {
+  if (cfg.mock) return {};
+  return call("unregister_webhook", { id, owner_client_id: cfg.lc.clientId }, CONFIG_BASE);
+}
+
+/**
+ * Makes sure exactly one webhook exists for our URL + action. Idempotent; safe to run on every boot.
+ * Returns { status: "exists" | "registered" | "skipped", id?, reason? }.
+ */
+export async function ensureWebhook() {
+  if (!cfg.webhook.configured) return { status: "skipped", reason: "LIVECHAT_WEBHOOK_SECRET or LIVECHAT_CLIENT_ID not set" };
+  if (!webhookUrl()) return { status: "skipped", reason: "no public URL (set PUBLIC_URL or RAILWAY_PUBLIC_DOMAIN)" };
+  const existing = await listWebhooks();
+  const mine = existing.find((w) => w.url === webhookUrl() && w.action === WEBHOOK_ACTION);
+  if (mine) return { status: "exists", id: mine.id };
+  const created = await registerWebhook();
+  return { status: "registered", id: created.id };
 }
 
 function mockChat(chatId) {
